@@ -1,0 +1,15 @@
+*.html
+Data/
+Models/
+*.png
+*.txt
+*.log
+*.csv
+*.xlsx
+__marimo__/
+__pycache__/
+Back Testing/
+Raw Filesg/
+Raw Files/
+Other/
+Training and Results/
