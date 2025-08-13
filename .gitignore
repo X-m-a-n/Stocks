@@ -11,13 +11,15 @@ Logs/
 Training and Results/
 Archived Code/
 Config/
+SQL/
 Data/Webscraping
 Data/Integrated
 Data/JSE Listed Instruments
 Data/Results
 Data/Old Data
+.devcontainer/
+.vscode/
 .gitignore
 .env
 *.ipynb
-
 Documentation/lstm results.csv
