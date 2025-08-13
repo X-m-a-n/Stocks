@@ -16,3 +16,4 @@ Training and Results/
 Archived Code/
 .gitignore
 .env
+*.ipynb
