@@ -94,12 +94,12 @@ class HealthResponse(BaseModel):
 def load_data_files():
     """Load stock and sentiment data files - Updated for deployment"""
     try:
-        # UPDATED: Look for data files in deployment environment
+        # UPDATED: Use the actual paths from your GitHub repo
         stock_files = [
-            "stocks_df_Sample.csv",
-            "clean_stock_data.parquet",
-            "data/stocks_df_Sample.csv",
-            "data/clean_stock_data.parquet"
+            "Data/clean_stock_data.parquet",  # Main data file from your repo
+            "Data/stocks_df_Sample.csv",      # Sample file from your repo
+            "clean_stock_data.parquet",       # Fallback
+            "stocks_df_Sample.csv"            # Fallback
         ]
         
         stocks_df = None
@@ -120,11 +120,13 @@ def load_data_files():
             logger.error("❌ No stock data file found")
             return None, None
         
-        # Load sentiment data - UPDATED paths
+        # Load sentiment data - UPDATED paths from your repo
         sentiment_df = None
         sentiment_files = [
-            "sentiment_data_FINAL.parquet",
-            "data/sentiment_data_FINAL.parquet"
+            "Data/sentiment_data_FINAL.parquet",  # From your repo
+            "Data/sentiment_data.parquet",        # Alternative
+            "sentiment_data_FINAL.parquet",       # Fallback
+            "sentiment_data.parquet"              # Fallback
         ]
         
         for sentiment_file in sentiment_files:
@@ -161,10 +163,12 @@ async def startup_event():
             logger.error("❌ Failed to load stock data")
             return
         
-        # UPDATED: Use relative models directory for deployment
-        models_dir = "models"  # Assume models are in repo
+        # UPDATED: Use relative models directory path from your repo structure
+        models_dir = "Models"  # Capital M to match your repo
         if not os.path.exists(models_dir):
-            models_dir = "."  # Fallback to current directory
+            models_dir = "models"  # Fallback to lowercase
+            if not os.path.exists(models_dir):
+                models_dir = "."  # Final fallback
         
         # Initialize data manager
         available_stocks = initialize_data_manager(stocks_df, sentiment_df, models_dir)
@@ -183,7 +187,7 @@ async def startup_event():
         _initialized = False
 
 # ================================
-# UTILITY FUNCTIONS - UNCHANGED
+# UTILITY FUNCTIONS
 # ================================
 
 def check_initialization():
@@ -219,7 +223,7 @@ def validate_prediction_dates(dates: List[str]) -> List[str]:
     return valid_dates
 
 # ================================
-# API ENDPOINTS - UNCHANGED
+# API ENDPOINTS
 # ================================
 
 @app.get("/", tags=["System"])
@@ -241,6 +245,7 @@ async def root():
     }
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
+@app.get("/heath", response_model=HealthResponse, tags=["System"])  # Handle Render's typo
 async def health_check():
     """Health check endpoint"""
     try:
@@ -478,10 +483,10 @@ if __name__ == "__main__":
     print("🧪 Test endpoint: /test")
     print("💹 Health check: /health")
     
-    # CRITICAL: Bind to all interfaces and use Render's PORT
+    # CRITICAL: Only run uvicorn here, remove duplicate startup
     uvicorn.run(
-        app,  # Use app object directly, not string
-        host="0.0.0.0",  # Must bind to all interfaces for Render
+        app,  # Use app object directly
+        host="0.0.0.0",
         port=port,
         reload=False,
         log_level="info",
