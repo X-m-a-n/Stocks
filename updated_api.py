@@ -34,10 +34,10 @@ app = FastAPI(
     version="3.0.0"
 )
 
-# Add CORS middleware
+# Add CORS middleware - UPDATED for deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, specify your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -88,36 +88,57 @@ class HealthResponse(BaseModel):
     available_stocks: int
 
 # ================================
-# INITIALIZATION
+# INITIALIZATION - UPDATED FOR DEPLOYMENT
 # ================================
 
 def load_data_files():
-    """Load stock and sentiment data files"""
+    """Load stock and sentiment data files - Updated for deployment"""
     try:
-        # Load stock data
-        stock_file = "stocks_df_Sample.csv"  # Your stock data file
-        if not os.path.exists(stock_file):
-            # Try alternative paths
-            stock_file = r"C:\Users\Joshh\Projects\Stocks\Data\clean_stock_data.parquet"
-            if not os.path.exists(stock_file):
-                stock_file = "clean_stock_data.parquet"
+        # UPDATED: Look for data files in deployment environment
+        stock_files = [
+            "stocks_df_Sample.csv",
+            "clean_stock_data.parquet",
+            "data/stocks_df_Sample.csv",
+            "data/clean_stock_data.parquet"
+        ]
         
-        if stock_file.endswith('.parquet'):
-            stocks_df = pl.read_parquet(stock_file)
-        else:
-            stocks_df = pl.read_csv(stock_file)
+        stocks_df = None
+        for stock_file in stock_files:
+            if os.path.exists(stock_file):
+                try:
+                    if stock_file.endswith('.parquet'):
+                        stocks_df = pl.read_parquet(stock_file)
+                    else:
+                        stocks_df = pl.read_csv(stock_file)
+                    logger.info(f"✅ Loaded stock data from {stock_file}: {len(stocks_df)} records")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to load {stock_file}: {e}")
+                    continue
         
-        logger.info(f"Loaded {len(stocks_df)} stock records")
+        if stocks_df is None:
+            logger.error("❌ No stock data file found")
+            return None, None
         
-        # Load sentiment data
+        # Load sentiment data - UPDATED paths
         sentiment_df = None
-        sentiment_file = r"C:\Users\Joshh\Projects\Stocks\Data\sentiment_data_FINAL.parquet"
+        sentiment_files = [
+            "sentiment_data_FINAL.parquet",
+            "data/sentiment_data_FINAL.parquet"
+        ]
         
-        if os.path.exists(sentiment_file):
-            sentiment_df = pl.read_parquet(sentiment_file)
-            logger.info(f"Loaded {len(sentiment_df)} sentiment records")
-        else:
-            logger.warning("Sentiment data file not found")
+        for sentiment_file in sentiment_files:
+            if os.path.exists(sentiment_file):
+                try:
+                    sentiment_df = pl.read_parquet(sentiment_file)
+                    logger.info(f"✅ Loaded sentiment data from {sentiment_file}: {len(sentiment_df)} records")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to load {sentiment_file}: {e}")
+                    continue
+        
+        if sentiment_df is None:
+            logger.warning("⚠️ No sentiment data found - sentiment features will be disabled")
         
         return stocks_df, sentiment_df
     
@@ -127,7 +148,7 @@ def load_data_files():
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize data manager on startup"""
+    """Initialize data manager on startup - UPDATED"""
     global _initialized
     
     try:
@@ -140,8 +161,13 @@ async def startup_event():
             logger.error("❌ Failed to load stock data")
             return
         
+        # UPDATED: Use relative models directory for deployment
+        models_dir = "models"  # Assume models are in repo
+        if not os.path.exists(models_dir):
+            models_dir = "."  # Fallback to current directory
+        
         # Initialize data manager
-        available_stocks = initialize_data_manager(stocks_df, sentiment_df, "models")
+        available_stocks = initialize_data_manager(stocks_df, sentiment_df, models_dir)
         
         if len(available_stocks) > 0:
             logger.info(f"✅ API initialized with {len(available_stocks)} stocks")
@@ -149,13 +175,15 @@ async def startup_event():
             _initialized = True
         else:
             logger.warning("⚠️ No stocks with trained models found")
+            # Still mark as initialized to allow basic API functionality
+            _initialized = True
     
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
         _initialized = False
 
 # ================================
-# UTILITY FUNCTIONS
+# UTILITY FUNCTIONS - UNCHANGED
 # ================================
 
 def check_initialization():
@@ -191,7 +219,7 @@ def validate_prediction_dates(dates: List[str]) -> List[str]:
     return valid_dates
 
 # ================================
-# API ENDPOINTS
+# API ENDPOINTS - UNCHANGED
 # ================================
 
 @app.get("/", tags=["System"])
@@ -201,6 +229,7 @@ async def root():
         "message": "JSE Stock Prediction API",
         "version": "3.0.0",
         "status": "running",
+        "deployment": "render",  # NEW: indicates deployment platform
         "endpoints": {
             "health": "/health",
             "stocks": "/stocks",
@@ -414,12 +443,13 @@ async def get_system_info():
         stocks = await get_available_stocks_list()
         
         return {
-            "api_version": "1.0.0",
+            "api_version": "3.0.0",
             "available_stocks": len(stocks),
             "model_types": ["PyTorch LSTM with Attention", "ARIMA Time Series"],
             "max_prediction_days": 30,
             "features": "Technical indicators + Sentiment analysis",
             "sample_stocks": stocks[:10] if stocks else [],
+            "deployment": "render",
             "timestamp": datetime.now().isoformat()
         }
     
@@ -433,20 +463,27 @@ async def test_endpoint():
     return {
         "message": "API is working!",
         "initialized": _initialized,
+        "deployment": "render",
         "timestamp": datetime.now().isoformat()
     }
 
+# UPDATED: Use environment variables for deployment
 if __name__ == "__main__":
-    print("🚀 Starting JSE Stock Prediction API...")
-    print("📡 API will be available at: http://localhost:8000")
-    print("📖 Documentation at: http://localhost:8000/docs")
-    print("🧪 Test endpoint: http://localhost:8000/test")
-    print("💹 Health check: http://localhost:8000/health")
+    # Get port from environment variable (Render sets this)
+    port = int(os.environ.get("PORT", 8000))
     
+    print("🚀 Starting JSE Stock Prediction API...")
+    print(f"📡 API will be available on port: {port}")
+    print("📖 Documentation at: /docs")
+    print("🧪 Test endpoint: /test")
+    print("💹 Health check: /health")
+    
+    # CRITICAL: Bind to all interfaces and use Render's PORT
     uvicorn.run(
-        "updated_api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        app,  # Use app object directly, not string
+        host="0.0.0.0",  # Must bind to all interfaces for Render
+        port=port,
+        reload=False,
+        log_level="info",
+        access_log=True
     )

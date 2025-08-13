@@ -8,6 +8,7 @@ import numpy as np
 import base64
 from io import BytesIO
 from PIL import Image
+import os
 
 # Page Configuration
 st.set_page_config(
@@ -17,8 +18,19 @@ st.set_page_config(
     page_icon="📈"
 )
 
-# Configuration
-API_BASE_URL = "http://localhost:8000"
+# UPDATED: Configuration for deployment with your actual URLs
+API_BASE_URL = "https://stocks-t52l.onrender.com"
+
+# Override with environment variable if set (for local development)
+if os.environ.get("API_BASE_URL"):
+    API_BASE_URL = os.environ.get("API_BASE_URL")
+
+# Streamlit Cloud secrets override (if you set it in secrets)
+try:
+    if hasattr(st, 'secrets') and 'API_BASE_URL' in st.secrets:
+        API_BASE_URL = st.secrets['API_BASE_URL']
+except:
+    pass  # Ignore if secrets not available
 
 # Custom CSS
 st.markdown("""
@@ -238,6 +250,9 @@ def display_wordcloud_image(wordcloud_b64):
 # ================================
 
 def main():
+    # UPDATED: Show API connection info
+    st.info(f"🔗 **API Connection:** `{API_BASE_URL}`")
+    
     # Header
     col_h1, col_h2, col_h3 = st.columns([2, 1, 1])
     
@@ -262,14 +277,21 @@ def main():
     
     # Check API connection
     if not api_connected:
-        st.error("🚨 **API Server Not Running**")
+        st.error("🚨 **API Server Not Available**")
         
-        with st.expander("🔧 Please launch the API Server", expanded=True):
-            st.markdown("""
-            **To start the API server:**
-            1. Ensure your the API server is running:
-            2. Refresh this page
-            3. Wait for "API is running" message
+        with st.expander("🔧 Connection Information", expanded=True):
+            st.markdown(f"""
+            **Current API URL:** `{API_BASE_URL}`
+            
+            **Troubleshooting:**
+            1. Verify the API server is deployed and running
+            2. Check if the API URL is correct
+            3. Ensure your network can reach the API endpoint
+            4. Try refreshing this page
+            
+            **For Local Development:**
+            - Make sure your API server is running locally
+            - Check that it's accessible at `http://localhost:8000`
             """)
 
         return
@@ -281,7 +303,7 @@ def main():
         return
     
     # ================================
-    # SIDEBAR CONTROLS
+    # SIDEBAR CONTROLS - UNCHANGED
     # ================================
     
     with st.sidebar:
@@ -818,7 +840,7 @@ def show_footer():
         ✅ Captures complex non-linear relationships  
         ✅ Handles multiple time-dependent variables  
         ✅ Incorporates market sentiment signals  
-        ❗ Requires sufficient historical data
+        ⚠ Requires sufficient historical data
         """)
     
     with col_model2:
@@ -834,7 +856,7 @@ def show_footer():
         ✅ Fast predictions and training  
         ✅ Interpretable statistical results  
         ✅ Good for short-term forecasts  
-        ❗ Limited to historical price patterns
+        ⚠ Limited to historical price patterns
         """)
 
 if __name__ == "__main__":
