@@ -199,16 +199,23 @@ def check_initialization():
         )
 
 def get_current_date():
-    """Get current date or simulation date"""
+    """Get current date or simulation date as string"""
+    if SIMULATION_DATE:
+        return SIMULATION_DATE
+    else:
+        return datetime.now().date().strftime('%Y-%m-%d')
+
+def get_current_date_object():
+    """Get current date or simulation date as date object"""
     if SIMULATION_DATE:
         return datetime.strptime(SIMULATION_DATE, '%Y-%m-%d').date()
     else:
         return datetime.now().date()
 
 def validate_prediction_dates(dates: List[str]) -> List[str]:
-    """Validate and filter prediction dates"""
+    """Validate and filter prediction dates - FIXED"""
     valid_dates = []
-    today = get_current_date()
+    today = get_current_date_object()  # Get as date object
     
     for date_str in dates:
         try:
@@ -299,15 +306,7 @@ async def predict_stock_price(
     dates: Optional[str] = None,
     days: int = 7
 ):
-    """
-    Generate stock price predictions
-    
-    Parameters:
-    - symbol: Stock symbol
-    - model: Model type ('lstm' or 'arima')
-    - dates: Comma-separated prediction dates (YYYY-MM-DD) or None for auto-generated dates
-    - days: Number of days to predict (if dates not provided)
-    """
+    """Generate stock price predictions - FIXED date handling"""
     check_initialization()
     
     try:
@@ -329,7 +328,7 @@ async def predict_stock_price(
                 detail=f"Stock {symbol} not found. Available: {available_stocks[:5]}..."
             )
         
-        # Handle prediction dates
+        # Handle prediction dates - FIXED
         if dates:
             # Parse provided dates
             date_list = [d.strip() for d in dates.split(',')]
@@ -341,9 +340,15 @@ async def predict_stock_price(
                     detail="No valid prediction dates provided"
                 )
         else:
-            # Generate next business days
-            today = get_current_date()
+            # Generate next business days - FIXED
+            today = get_current_date_object()  # Get as date object
             prediction_dates = get_next_business_days(today, min(days, 30))
+            
+            if not prediction_dates:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not generate prediction dates"
+                )
         
         logger.info(f"Generating {model} predictions for {symbol} on dates: {prediction_dates}")
         
@@ -359,7 +364,8 @@ async def predict_stock_price(
         raise
     except Exception as e:
         logger.error(f"Error predicting {symbol}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.get("/sentiment/{symbol}", response_model=SentimentResponse, tags=["Sentiment"])
 async def get_stock_sentiment(symbol: str):

@@ -1097,22 +1097,32 @@ def generate_predictions_for_dates(symbol: str, dates: List[str], model_type: st
     
     return predictions
 
-def get_next_business_days(start_date: str, num_days: int) -> List[str]:
-    """Get next N business days from start date"""
+def get_next_business_days(start_date, num_days: int) -> List[str]:
+    """Get next N business days from start date - FIXED to handle both str and date objects"""
     try:
-        start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        # Handle both string and date object inputs
+        if isinstance(start_date, str):
+            start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        elif hasattr(start_date, 'date'):  # datetime object
+            start = start_date.date()
+        else:  # Already a date object
+            start = start_date
+        
         business_days = []
         current = start
         
         while len(business_days) < num_days:
             current += timedelta(days=1)
-            # Skip weekends
+            # Skip weekends (Monday = 0, Friday = 4)
             if current.weekday() < 5:
                 business_days.append(current.strftime('%Y-%m-%d'))
         
+        logger.info(f"✅ Generated {len(business_days)} business days from {start}")
         return business_days
+        
     except Exception as e:
         logger.error(f"Error getting business days: {e}")
+        logger.error(f"Input was: {start_date} (type: {type(start_date)})")
         return []
 
 # ================================
