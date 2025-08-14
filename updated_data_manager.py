@@ -155,50 +155,77 @@ def load_sentiment_data_from_github() -> Optional[pl.DataFrame]:
         return None
 
 def get_available_stocks_from_github() -> List[str]:
-    """Get list of stocks that have trained models on GitHub"""
+    """Get list of stocks that have trained models on GitHub - IMPROVED"""
     stocks = set()
     
     try:
+        logger.info("🔍 Fetching available stocks from GitHub...")
+        
         # Get ARIMA models list
+        logger.info("📈 Checking ARIMA models...")
         arima_models = fetch_github_directory_listing("Models/ARIMA/")
+        arima_count = 0
         for filename in arima_models:
             if filename.endswith("_arima_model.pkl"):
                 symbol = filename.replace("_arima_model.pkl", "")
                 stocks.add(symbol)
+                arima_count += 1
+        
+        logger.info(f"✅ Found {arima_count} ARIMA models")
         
         # Get LSTM models list  
+        logger.info("🧠 Checking LSTM models...")
         lstm_models = fetch_github_directory_listing("Models/LSTM/")
+        lstm_count = 0
         for filename in lstm_models:
             if filename.endswith("_model.pth"):
                 symbol = filename.replace("_model.pth", "")
                 stocks.add(symbol)
+                lstm_count += 1
         
-        logger.info(f"Found {len(stocks)} stocks with models on GitHub")
+        logger.info(f"✅ Found {lstm_count} LSTM models")
+        
+        total_stocks = len(stocks)
+        logger.info(f"🎯 Total unique stocks with models: {total_stocks}")
+        
+        if total_stocks == 0:
+            logger.error("❌ No stocks found with trained models")
+            return []
+        
         return sorted(list(stocks))
     
     except Exception as e:
-        logger.error(f"Error getting available stocks from GitHub: {e}")
+        logger.error(f"❌ Error getting available stocks from GitHub: {e}")
         return []
 
 def fetch_github_directory_listing(path: str) -> List[str]:
-    """Fetch directory listing from GitHub API"""
+    """Fetch directory listing from GitHub API - IMPROVED"""
     try:
         api_url = f"https://api.github.com/repos/X-m-a-n/Stocks/contents/{path}"
-        response = requests.get(api_url, timeout=10)
+        logger.info(f"📡 Fetching directory: {api_url}")
+        
+        response = requests.get(api_url, timeout=15)
         response.raise_for_status()
         
         files = response.json()
         if isinstance(files, list):
-            return [file['name'] for file in files if file['type'] == 'file']
+            filenames = [file['name'] for file in files if file['type'] == 'file']
+            logger.info(f"✅ Found {len(filenames)} files in {path}")
+            return filenames
+        else:
+            logger.warning(f"⚠️ Unexpected response format for {path}")
+            return []
+    
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            logger.warning(f"⚠️ Directory not found: {path}")
+        else:
+            logger.error(f"❌ HTTP error fetching {path}: {e.response.status_code}")
         return []
     
     except Exception as e:
-        logger.warning(f"Could not fetch directory listing for {path}: {e}")
-        # Fallback: try common stock symbols
-        common_symbols = ['AGL', 'BHP', 'CLS', 'DSY', 'FSR', 'GRT', 'INL', 'INP', 
-                         'KIO', 'LHC', 'MTN', 'NED', 'NPN', 'SBK', 'SHP', 'SLM', 
-                         'SOL', 'TKG', 'VOD', 'WHL']
-        return common_symbols
+        logger.warning(f"⚠️ Could not fetch directory listing for {path}: {e}")
+        return []
 
 def load_pytorch_model_from_github(symbol: str) -> Optional[torch.nn.Module]:
     """Load PyTorch LSTM model from GitHub"""
@@ -387,38 +414,99 @@ class MomentumLSTM(nn.Module):
 # ================================
 
 def initialize_data_manager(stocks_df: pl.DataFrame = None, sentiment_df: pl.DataFrame = None, models_dir: str = None) -> List[str]:
-    """Initialize the data manager with stock and sentiment data"""
+    """Initialize the data manager with stock and sentiment data - FIXED VERSION"""
     global _stocks_df, _sentiment_df
     
-    # If no data provided, load from GitHub
-    if stocks_df is None:
-        _stocks_df = load_stock_data_from_github()
-    else:
-        _stocks_df = stocks_df
+    logger.info("🚀 Starting data manager initialization...")
     
-    if sentiment_df is None:
-        _sentiment_df = load_sentiment_data_from_github()
-    else:
-        _sentiment_df = sentiment_df
-    
-    # Ensure date columns are properly formatted
-    if _stocks_df is not None and _stocks_df['date'].dtype == pl.Utf8:
-        _stocks_df = _stocks_df.with_columns(pl.col('date').str.to_date())
-    
-    if _sentiment_df is not None and 'publication_date' in _sentiment_df.columns:
-        if _sentiment_df['publication_date'].dtype == pl.Utf8:
-            _sentiment_df = _sentiment_df.with_columns(
-                pl.col('publication_date').str.to_date().alias('date')
-            )
-    
-    # Get available stocks (from GitHub if no local models_dir)
-    if models_dir is None:
-        available_stocks = get_available_stocks_from_github()
-    else:
-        available_stocks = get_available_stocks_local(models_dir)
-    
-    logger.info(f"Initialized with {len(available_stocks)} stocks")
-    return available_stocks
+    try:
+        # Step 1: Load stock data
+        logger.info("📊 Loading stock data...")
+        if stocks_df is None:
+            _stocks_df = load_stock_data_from_github()
+            if _stocks_df is None:
+                raise Exception("Failed to load stock data from GitHub")
+        else:
+            _stocks_df = stocks_df
+        
+        logger.info(f"✅ Stock data loaded: {_stocks_df.shape[0]} rows, {_stocks_df.shape[1]} columns")
+        
+        # Step 2: Load sentiment data (optional)
+        logger.info("💭 Loading sentiment data...")
+        if sentiment_df is None:
+            _sentiment_df = load_sentiment_data_from_github()
+            if _sentiment_df is None:
+                logger.warning("⚠️ Sentiment data not available - continuing without it")
+            else:
+                logger.info(f"✅ Sentiment data loaded: {_sentiment_df.shape[0]} rows")
+        else:
+            _sentiment_df = sentiment_df
+        
+        # Step 3: Ensure date columns are properly formatted
+        logger.info("📅 Formatting date columns...")
+        if _stocks_df is not None:
+            try:
+                if _stocks_df['date'].dtype == pl.Utf8:
+                    _stocks_df = _stocks_df.with_columns(pl.col('date').str.to_date())
+                logger.info("✅ Stock data dates formatted")
+            except Exception as e:
+                logger.warning(f"⚠️ Date formatting issue in stock data: {e}")
+        
+        if _sentiment_df is not None:
+            try:
+                if 'publication_date' in _sentiment_df.columns:
+                    if _sentiment_df['publication_date'].dtype == pl.Utf8:
+                        _sentiment_df = _sentiment_df.with_columns(
+                            pl.col('publication_date').str.to_date().alias('date')
+                        )
+                logger.info("✅ Sentiment data dates formatted")
+            except Exception as e:
+                logger.warning(f"⚠️ Date formatting issue in sentiment data: {e}")
+        
+        # Step 4: Get available stocks
+        logger.info("🎯 Getting available stocks...")
+        if models_dir is None:
+            available_stocks = get_available_stocks_from_github()
+        else:
+            available_stocks = get_available_stocks_local(models_dir)
+        
+        logger.info(f"✅ Found {len(available_stocks)} stocks with models")
+        
+        # Step 5: Validate we have some stocks
+        if not available_stocks:
+            logger.error("❌ No stocks with trained models found!")
+            # Return empty list but don't crash
+            return []
+        
+        # Step 6: Test loading one model to verify everything works
+        logger.info("🧪 Testing model loading...")
+        test_symbol = available_stocks[0]
+        
+        try:
+            # Try to load LSTM model for first stock
+            test_model = load_pytorch_model_from_github(test_symbol)
+            if test_model is not None:
+                logger.info(f"✅ Successfully tested LSTM model for {test_symbol}")
+            else:
+                logger.warning(f"⚠️ Could not load LSTM model for {test_symbol}")
+            
+            # Try to load ARIMA model
+            test_arima = load_arima_model_from_github(test_symbol)
+            if test_arima is not None:
+                logger.info(f"✅ Successfully tested ARIMA model for {test_symbol}")
+            else:
+                logger.warning(f"⚠️ Could not load ARIMA model for {test_symbol}")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Model testing failed: {e}")
+        
+        logger.info(f"🎉 Initialization completed successfully with {len(available_stocks)} stocks")
+        return available_stocks
+        
+    except Exception as e:
+        logger.error(f"❌ Initialization failed: {e}")
+        # Return empty list instead of crashing
+        return []
 
 def get_available_stocks(models_dir: str = None) -> List[str]:
     """Get list of stocks that have trained models"""
@@ -1088,13 +1176,25 @@ async def clear_cache():
 # ================================
 
 def check_github_connection() -> bool:
-    """Test connection to GitHub repository"""
-    try:
-        test_url = GITHUB_BASE_URL + "README.md"
-        response = requests.get(test_url, timeout=10)
-        return response.status_code == 200
-    except:
-        return False
+    """Test connection to GitHub repository - IMPROVED"""
+    test_urls = [
+        "https://api.github.com/repos/X-m-a-n/Stocks",
+        "https://raw.githubusercontent.com/X-m-a-n/Stocks/main/Data/clean_stock_data.parquet"
+    ]
+    
+    for url in test_urls:
+        try:
+            logger.info(f"🔍 Testing GitHub connection: {url}")
+            response = requests.head(url, timeout=10)  # Use HEAD for faster check
+            if response.status_code == 200:
+                logger.info("✅ GitHub connection successful")
+                return True
+        except Exception as e:
+            logger.warning(f"⚠️ GitHub connection test failed for {url}: {e}")
+            continue
+    
+    logger.error("❌ All GitHub connection tests failed")
+    return False
 
 def get_data_info() -> Dict:
     """Get information about loaded datasets"""
