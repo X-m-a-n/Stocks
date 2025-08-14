@@ -18,6 +18,7 @@ import base64
 import requests
 from urllib.parse import urljoin
 import tempfile
+from requests.auth import HTTPBasicAuth
 
 SIMULATION_DATE = "2024-10-01"
 
@@ -25,6 +26,11 @@ SIMULATION_DATE = "2024-10-01"
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/X-m-a-n/Stocks/main/"
 GITHUB_DATA_URL = GITHUB_BASE_URL + "Data/"
 GITHUB_MODELS_URL = GITHUB_BASE_URL + "Models/"
+
+# GitHub authentication setup
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')  # Set this in Render environment variables
+GITHUB_USERNAME = os.environ.get('GITHUB_USERNAME', 'X-m-a-n')  # Your GitHub username
+
 
 def get_current_date():
     """Get current date or simulation date"""
@@ -70,6 +76,70 @@ _github_file_cache = {}
 # GITHUB DATA LOADING FUNCTIONS
 # ================================
 
+def create_authenticated_session():
+    """Create a requests session with GitHub authentication"""
+    session = requests.Session()
+    
+    if GITHUB_TOKEN:
+        # Method A: Token in Authorization header (Preferred)
+        session.headers.update({
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'JSE-Stock-Prediction-API/1.0'
+        })
+        logger.info("✅ Using GitHub token authentication")
+    else:
+        # Fallback: Just set user agent
+        session.headers.update({
+            'User-Agent': 'JSE-Stock-Prediction-API/1.0',
+            'Accept': 'application/vnd.github.v3+json'
+        })
+        logger.warning("⚠️ No GitHub token found, using unauthenticated requests")
+    
+    return session
+
+# Global authenticated session
+_github_session = create_authenticated_session()
+
+def fetch_github_directory_listing_authenticated(path: str) -> List[str]:
+    """Fetch directory listing from GitHub API with authentication"""
+    try:
+        api_url = f"https://api.github.com/repos/X-m-a-n/Stocks/contents/{path}"
+        logger.info(f"📡 Fetching directory (authenticated): {api_url}")
+        
+        response = _github_session.get(api_url, timeout=15)
+        
+        # Check rate limit headers
+        if 'X-RateLimit-Remaining' in response.headers:
+            remaining = response.headers['X-RateLimit-Remaining']
+            reset_time = response.headers.get('X-RateLimit-Reset', 'unknown')
+            logger.info(f"📊 GitHub API rate limit: {remaining} requests remaining")
+        
+        response.raise_for_status()
+        
+        files = response.json()
+        if isinstance(files, list):
+            filenames = [file['name'] for file in files if file['type'] == 'file']
+            logger.info(f"✅ Found {len(filenames)} files in {path}")
+            return filenames
+        else:
+            logger.warning(f"⚠️ Unexpected response format for {path}")
+            return []
+    
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.error(f"❌ GitHub API rate limit exceeded for {path}")
+            logger.error(f"   Response: {e.response.text[:200]}")
+        elif e.response.status_code == 404:
+            logger.warning(f"⚠️ Directory not found: {path}")
+        else:
+            logger.error(f"❌ HTTP error fetching {path}: {e.response.status_code}")
+        return []
+    
+    except Exception as e:
+        logger.warning(f"⚠️ Could not fetch directory listing for {path}: {e}")
+        return []
+
 def download_from_github(url: str, cache_key: str = None) -> Optional[bytes]:
     """Download file from GitHub with caching"""
     if cache_key and cache_key in _github_file_cache:
@@ -91,11 +161,55 @@ def download_from_github(url: str, cache_key: str = None) -> Optional[bytes]:
         logger.error(f"Failed to download from {url}: {e}")
         return None
 
+def download_from_github_authenticated(url: str, cache_key: str = None) -> Optional[bytes]:
+    """Download file from GitHub with authentication"""
+    global _github_file_cache
+    
+    if cache_key and cache_key in _github_file_cache:
+        logger.info(f"📋 Using cached data for {cache_key}")
+        return _github_file_cache[cache_key]
+    
+    try:
+        logger.info(f"📥 Downloading (authenticated): {url}")
+        
+        response = _github_session.get(url, timeout=30)
+        
+        # Check rate limit
+        if 'X-RateLimit-Remaining' in response.headers:
+            remaining = response.headers['X-RateLimit-Remaining']
+            logger.info(f"📊 Rate limit remaining: {remaining}")
+        
+        response.raise_for_status()
+        
+        content = response.content
+        content_length = len(content)
+        
+        if content_length == 0:
+            raise Exception("Downloaded file is empty")
+        
+        if cache_key:
+            _github_file_cache[cache_key] = content
+        
+        logger.info(f"✅ Successfully downloaded {content_length:,} bytes")
+        return content
+    
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            logger.error(f"❌ GitHub rate limit exceeded: {e}")
+            logger.error(f"   Headers: {dict(e.response.headers)}")
+        else:
+            logger.error(f"❌ HTTP error downloading {url}: {e}")
+        return None
+    
+    except Exception as e:
+        logger.error(f"❌ Error downloading {url}: {e}")
+        return None
+
 def load_stock_data_from_github() -> Optional[pl.DataFrame]:
-    """Load stock data from GitHub parquet file"""
+    """Load stock data from GitHub parquet file - WITH AUTHENTICATION"""
     try:
         url = GITHUB_DATA_URL + "clean_stock_data.parquet"
-        content = download_from_github(url, "stock_data")
+        content = download_from_github_authenticated(url, "stock_data")
         
         if content is None:
             return None
@@ -122,10 +236,10 @@ def load_stock_data_from_github() -> Optional[pl.DataFrame]:
         return None
 
 def load_sentiment_data_from_github() -> Optional[pl.DataFrame]:
-    """Load sentiment data from GitHub parquet file"""
+    """Load sentiment data from GitHub parquet file - WITH AUTHENTICATION"""
     try:
         url = GITHUB_DATA_URL + "sentiment_data_FINAL.parquet"
-        content = download_from_github(url, "sentiment_data")
+        content = download_from_github_authenticated(url, "sentiment_data")
         
         if content is None:
             return None
@@ -155,15 +269,15 @@ def load_sentiment_data_from_github() -> Optional[pl.DataFrame]:
         return None
 
 def get_available_stocks_from_github() -> List[str]:
-    """Get list of stocks that have trained models on GitHub - IMPROVED"""
+    """Get list of stocks that have trained models on GitHub - WITH AUTHENTICATION"""
     stocks = set()
     
     try:
-        logger.info("🔍 Fetching available stocks from GitHub...")
+        logger.info("🔍 Fetching available stocks from GitHub (authenticated)...")
         
         # Get ARIMA models list
         logger.info("📈 Checking ARIMA models...")
-        arima_models = fetch_github_directory_listing("Models/ARIMA/")
+        arima_models = fetch_github_directory_listing_authenticated("Models/ARIMA/")
         arima_count = 0
         for filename in arima_models:
             if filename.endswith("_arima_model.pkl"):
@@ -175,7 +289,7 @@ def get_available_stocks_from_github() -> List[str]:
         
         # Get LSTM models list  
         logger.info("🧠 Checking LSTM models...")
-        lstm_models = fetch_github_directory_listing("Models/LSTM/")
+        lstm_models = fetch_github_directory_listing_authenticated("Models/LSTM/")
         lstm_count = 0
         for filename in lstm_models:
             if filename.endswith("_model.pth"):
@@ -197,6 +311,29 @@ def get_available_stocks_from_github() -> List[str]:
     except Exception as e:
         logger.error(f"❌ Error getting available stocks from GitHub: {e}")
         return []
+
+def check_github_connection_authenticated() -> bool:
+    """Test connection to GitHub repository with authentication"""
+    try:
+        test_url = "https://api.github.com/repos/X-m-a-n/Stocks"
+        logger.info(f"🔍 Testing authenticated GitHub connection: {test_url}")
+        
+        response = _github_session.get(test_url, timeout=10)
+        
+        if 'X-RateLimit-Remaining' in response.headers:
+            remaining = response.headers['X-RateLimit-Remaining']
+            logger.info(f"📊 GitHub API rate limit: {remaining} requests remaining")
+        
+        if response.status_code == 200:
+            logger.info("✅ Authenticated GitHub connection successful")
+            return True
+        else:
+            logger.error(f"❌ GitHub connection failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ GitHub connection test failed: {e}")
+        return False
 
 def fetch_github_directory_listing(path: str) -> List[str]:
     """Fetch directory listing from GitHub API - IMPROVED"""
